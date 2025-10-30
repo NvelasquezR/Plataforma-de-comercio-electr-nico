@@ -6,7 +6,6 @@ Plataforma completa de comercio electrónico con carrito de compras, sistema de 
    - Base de datos (Firestore)
    - Autenticación de usuarios
    - Almacenar pedidos e inventario
-<br>
 2. Vercel/Netlify para:
    - Hospedar tu HTML/CSS/JS
    - Deploy automático
