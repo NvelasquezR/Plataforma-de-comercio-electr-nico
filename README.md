@@ -10,4 +10,4 @@ Plataforma completa de comercio electrónico con carrito de compras, sistema de 
    - Hospedar tu HTML/CSS/JS
    - Deploy automático
 # Notas
-Esta plataforma se creo con los lenguajes de HTML, CSS y JavaScript. Debes de tener un conocimiento previo para realizarla asi mismo de las bases de datos en este caso _firebase_.
+Esta plataforma se creo con los lenguajes de HTML, CSS y JavaScript. Debes de tener un conocimiento previo para realizarla asi mismo de las bases de datos en este caso _firebase_. Dentro del _Index_ encontraras los codigos JS.
