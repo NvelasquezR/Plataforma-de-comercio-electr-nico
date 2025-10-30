@@ -9,6 +9,5 @@ Plataforma completa de comercio electrónico con carrito de compras, sistema de 
 2. Vercel/Netlify para:
    - Hospedar tu HTML/CSS/JS
    - Deploy automático
-<br>
 # Notas
 Esta plataforma se creo con los lenguajes de HTML, CSS y JavaScript. Debes de tener un conocimiento previo para realizarla asi mismo de las bases de datos en este caso _firebase_.
