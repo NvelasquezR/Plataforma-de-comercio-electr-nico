@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TechStore - Tu Tienda Online</title>
+    <link rel="stylesheet" type="text/css" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Banner de Configuración Firebase -->
+        <div class="firebase-config-banner" id="firebaseConfigBanner">
+            <h3>⚙️ Configuración de Firebase Requerida</h3>
+            <p>
+                <strong>Para usar esta aplicación necesitas:</strong><br>
+                1. Crear un proyecto en <a href="https://console.firebase.google.com" target="_blank" style="color: white; text-decoration: underline;">Firebase Console</a><br>
+                2. Activar <code>Authentication</code> (Email/Password)<br>
+                3. Activar <code>Firestore Database</code><br>
+                4. Copiar tu configuración y pegarla en el código (línea 450)<br>
+                5. Reemplazar <code>firebaseConfig</code> con tus credenciales
+            </p>
+        </div>
+
+        <header>
+            <div class="logo">🛍️ TechStore</div>
+            <div class="header-actions" id="headerActions">
+                <div class="loading">Cargando Firebase...</div>
+            </div>
+        </header>
+
+        <div id="appContent">
+            <div class="loading">⏳ Inicializando aplicación...</div>
+        </div>
+    </div>
+
+    <!-- Modales -->
+    <div class="modal" id="authModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="authTitle">Iniciar Sesión</h3>
+                <button class="close-btn" onclick="closeAuthModal()">×</button>
+            </div>
+            <div id="authContent"></div>
+        </div>
+    </div>
+
+    <div class="modal" id="checkoutModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Finalizar Compra</h3>
+                <button class="close-btn" onclick="closeCheckout()">×</button>
+            </div>
+            <div id="checkoutContent"></div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <script>
+         const firebaseConfig = {
+            apiKey: "AIzaSyC-bNItNHSnlHvSoYwQ0ggagSwItxAlV0A",
+            authDomain: "mi-tienda-online-616ba.firebaseapp.com",
+            projectId: "mi-tienda-online-616ba",
+            storageBucket: "mi-tienda-online-616ba.firebasestorage.app",
+            messagingSenderId: "569074189107",
+            appId: "1:569074189107:web:9c391e08d5302bbd9af446"
+        };
+
+        let app, auth, db;
+        let firebaseInitialized = false;
+
+        try {
+            app = firebase.initializeApp(firebaseConfig);
+            auth = firebase.auth();
+            db = firebase.firestore();
+            firebaseInitialized = true;
+            console.log('✅ Firebase inicializado correctamente');
+            document.getElementById('firebaseConfigBanner').style.display = 'none';
+        } catch (error) {
+            console.error('❌ Error al inicializar Firebase:', error);
+            console.log('Por favor, configura Firebase correctamente');
+        }
+
+        // ========================================
+        // VARIABLES GLOBALES
+        // ========================================
+        let currentUser = null;
+        let cart = [];
+        let currentFilter = 'all';
+        let selectedPayment = 'Tarjeta';
+
+        const defaultProducts = [
+            { id: 'p1', name: 'Smartphone Pro', category: 'Electronics', price: 699.99, stock: 15, icon: '📱' },
+            { id: 'p2', name: 'Laptop Gaming', category: 'Electronics', price: 1299.99, stock: 8, icon: '💻' },
+            { id: 'p3', name: 'Auriculares Bluetooth', category: 'Electronics', price: 149.99, stock: 25, icon: '🎧' },
+            { id: 'p4', name: 'Camiseta Deportiva', category: 'Clothing', price: 29.99, stock: 50, icon: '👕' },
+            { id: 'p5', name: 'Zapatillas Running', category: 'Clothing', price: 89.99, stock: 20, icon: '👟' },
+            { id: 'p6', name: 'Cafetera Automática', category: 'Home', price: 179.99, stock: 12, icon: '☕' },
+            { id: 'p7', name: 'Aspiradora Robot', category: 'Home', price: 299.99, stock: 6, icon: '🤖' },
+            { id: 'p8', name: 'Bicicleta Montaña', category: 'Sports', price: 499.99, stock: 5, icon: '🚴' }
+        ];
+
+        // ========================================
+        // INICIALIZACIÓN
+        // ========================================
+        async function initializeApp() {
+            if (!firebaseInitialized) {
+                document.getElementById('appContent').innerHTML = `
+                    <div class="products-section" style="text-align: center; padding: 60px;">
+                        <h2 style="color: white; margin-bottom: 20px;">⚠️ Firebase no configurado</h2>
+                        <p style="color: white; font-size: 16px;">
+                            Por favor, sigue las instrucciones arriba para configurar Firebase.<br>
+                            Una vez configurado, recarga la página.
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+
+            try {
+                await initializeProducts();
+                
+                auth.onAuthStateChanged(async (user) => {
+                    if (user) {
+                        const userDoc = await db.collection('users').doc(user.uid).get();
+                        if (userDoc.exists) {
+                            currentUser = { uid: user.uid, ...userDoc.data() };
+                        }
+                    } else {
+                        currentUser = null;
+                    }
+                    renderApp();
+                });
+            } catch (error) {
+                console.error('Error initializing app:', error);
+                alert('Error al inicializar la aplicación');
+            }
+        }
+
+        async function initializeProducts() {
+            try {
+                const snapshot = await db.collection('products').get();
+                if (snapshot.empty) {
+                    const batch = db.batch();
+                    defaultProducts.forEach(product => {
+                        const docRef = db.collection('products').doc(product.id);
+                        batch.set(docRef, product);
+                    });
+                    await batch.commit();
+                    console.log('✅ Productos inicializados');
+                }
+            } catch (error) {
+                console.error('Error initializing products:', error);
+            }
+        }
+
+        // ========================================
+        // RENDER
+        // ========================================
+        function renderApp() {
+            const headerActions = document.getElementById('headerActions');
+            const appContent = document.getElementById('appContent');
+
+            if (!currentUser) {
+                headerActions.innerHTML = `
+                    <button class="btn btn-primary" onclick="openAuthModal('login')">Iniciar Sesión</button>
+                    <button class="btn btn-secondary" onclick="openAuthModal('register')">Registrarse</button>
+                `;
+                appContent.innerHTML = `
+                    <div class="products-section">
+                        <h2 class="section-title" style="color: white;">Bienvenido a TechStore</h2>
+                        <p style="color: white; margin-bottom: 30px;">Por favor, inicia sesión o regístrate para comenzar a comprar.</p>
+                        <div id="productsPreview"></div>
+                    </div>
+                `;
+                renderProductsPreview();
+            } else {
+                headerActions.innerHTML = `
+                    <div class="user-info">
+                        <span>👤 ${currentUser.name}</span>
+                    </div>
+                    <button class="btn btn-secondary" onclick="viewOrders()">📦 Mis Pedidos</button>
+                    ${currentUser.isAdmin ? '<button class="btn btn-secondary" onclick="toggleAdminPanel()">⚙️ Admin</button>' : ''}
+                    <button class="btn btn-primary" onclick="toggleCart()">
+                        🛒 Carrito
+                        <span class="cart-badge" id="cartBadge">0</span>
+                    </button>
+                    <button class="btn btn-danger" onclick="logout()">Salir</button>
+                `;
+                renderMainContent();
+            }
+        }
+
+        async function renderProductsPreview() {
+            const preview = document.getElementById('productsPreview');
+            try {
+                const snapshot = await db.collection('products').limit(4).get();
+                const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                preview.innerHTML = `
+                    <div class="products-grid">
+                        ${products.map(product => `
+                            <div class="product-card" style="opacity: 0.7; pointer-events: none;">
+                                <div class="product-image">${product.icon}</div>
+                                <div class="product-category">${product.category}</div>
+                                <div class="product-name">${product.name}</div>
+                                <div class="product-price">$${product.price.toFixed(2)}</div>
+                                <button class="btn btn-primary" style="width: 100%;" disabled>
+                                    Inicia sesión para comprar
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error loading products:', error);
+            }
+        }
+
+        async function renderMainContent() {
+            const appContent = document.getElementById('appContent');
+            appContent.innerHTML = `
+                <div class="main-content">
+                    <div class="products-section">
+                        <h2 class="section-title">Nuestros Productos</h2>
+                        <div class="filters">
+                            <button class="filter-btn active" onclick="filterProducts('all', event)">Todos</button>
+                            <button class="filter-btn" onclick="filterProducts('Electronics', event)">Electrónica</button>
+                            <button class="filter-btn" onclick="filterProducts('Clothing', event)">Ropa</button>
+                            <button class="filter-btn" onclick="filterProducts('Home', event)">Hogar</button>
+                            <button class="filter-btn" onclick="filterProducts('Sports', event)">Deportes</button>
+                        </div>
+                        <div class="products-grid" id="productsGrid"></div>
+                    </div>
+
+                    <div class="sidebar">
+                        <div class="cart-panel">
+                            <h3 class="section-title">Mi Carrito</h3>
+                            <div class="cart-items" id="cartItems"></div>
+                            <div class="cart-total" id="cartTotal"></div>
+                        </div>
+
+                        <div class="admin-panel" style="display: none;" id="adminPanel">
+                            <h3 class="section-title">Gestión de Inventario</h3>
+                            <form class="admin-form" onsubmit="addProduct(event)">
+                                <div class="form-group">
+                                    <label>Nombre del Producto</label>
+                                    <input type="text" id="productName" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Categoría</label>
+                                    <select id="productCategory" required>
+                                        <option value="Electronics">Electrónica</option>
+                                        <option value="Clothing">Ropa</option>
+                                        <option value="Home">Hogar</option>
+                                        <option value="Sports">Deportes</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Precio ($)</label>
+                                    <input type="number" id="productPrice" step="0.01" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Stock</label>
+                                    <input type="number" id="productStock" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Emoji/Ícono</label>
+                                    <input type="text" id="productIcon" placeholder="📱" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary" style="width: 100%;">Agregar Producto</button>
+                            </form>
+                        </div>
+
+                        <div class="orders-panel" style="display: none;" id="ordersPanel">
+                            <h3 class="section-title">Mis Pedidos</h3>
+                            <div class="orders-list" id="ordersList"></div>
+                            <button class="btn btn-secondary" style="width: 100%; margin-top: 10px;" onclick="backToShop()">
+                                ← Volver a la Tienda
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            await renderProducts();
+            updateCart();
+        }
+
+        // ========================================
+        // PRODUCTOS
+        // ========================================
+        async function renderProducts() {
+            const grid = document.getElementById('productsGrid');
+            if (!grid) return;
+
+            try {
+                let query = db.collection('products');
+                if (currentFilter !== 'all') {
+                    query = query.where('category', '==', currentFilter);
+                }
+                
+                const snapshot = await query.get();
+                const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                grid.innerHTML = products.map(product => `
+                    <div class="product-card" onclick="addToCart('${product.id}')">
+                        <div class="product-image">${product.icon}</div>
+                        <div class="product-category">${product.category}</div>
+                        <div class="product-name">${product.name}</div>
+                        <div class="product-price">$${product.price.toFixed(2)}</div>
+                        <div class="product-stock ${product.stock < 5 ? 'low' : ''} ${product.stock === 0 ? 'out' : ''}">
+                            ${product.stock > 0 ? `${product.stock} disponibles` : 'Agotado'}
+                        </div>
+                        <button class="btn btn-primary" style="width: 100%;" ${product.stock === 0 ? 'disabled' : ''}>
+                            Agregar al Carrito
+                        </button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading products:', error);
+                grid.innerHTML = '<p style="color: #ef4444;">Error al cargar productos</p>';
+            }
+        }
+
+        async function filterProducts(category, event) {
+            currentFilter = category;
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            await renderProducts();
+        }
+
+        async function addProduct(event) {
+            event.preventDefault();
+            
+            try {
+                const newProduct = {
+                    name: document.getElementById('productName').value,
+                    category: document.getElementById('productCategory').value,
+                    price: parseFloat(document.getElementById('productPrice').value),
+                    stock: parseInt(document.getElementById('productStock').value),
+                    icon: document.getElementById('productIcon').value
+                };
+
+                await db.collection('products').add(newProduct);
+                await renderProducts();
+                event.target.reset();
+                alert('✅ Producto agregado exitosamente');
+            } catch (error) {
+                console.error('Error adding product:', error);
+                alert('❌ Error al agregar producto');
+            }
+        }
+
+        // ========================================
+        // CARRITO
+        // ========================================
+        async function addToCart(productId) {
+            try {
+                const productDoc = await db.collection('products').doc(productId).get();
+                if (!productDoc.exists) return;
+                
+                const product = { id: productDoc.id, ...productDoc.data() };
+                if (product.stock === 0) {
+                    alert('Producto agotado');
+                    return;
+                }
+
+                const cartItem = cart.find(item => item.id === productId);
+                if (cartItem) {
+                    if (cartItem.quantity < product.stock) {
+                        cartItem.quantity++;
+                    } else {
+                        alert('No hay más stock disponible');
+                        return;
+                    }
+                } else {
+                    cart.push({ ...product, quantity: 1 });
+                }
+                
+                updateCart();
+            } catch (error) {
+                console.error('Error adding to cart:', error);
+            }
+        }
+
+        function updateCart() {
+            const cartItems = document.getElementById('cartItems');
+            const cartTotal = document.getElementById('cartTotal');
+            const cartBadge = document.getElementById('cartBadge');
+
+            if (!cartItems || !cartTotal || !cartBadge) return;
+
+            const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+            cartBadge.textContent = totalItems;
+
+            if (cart.length === 0) {
+                cartItems.innerHTML = '<div class="empty-cart">🛒<br>Tu carrito está vacío</div>';
+                cartTotal.innerHTML = '';
+                return;
+            }
+
+            cartItems.innerHTML = cart.map(item => `
+                <div class="cart-item">
+                    <div class="cart-item-image">${item.icon}</div>
+                    <div class="cart-item-details">
+                        <div class="cart-item-name">${item.name}</div>
+                        <div class="cart-item-price">${item.price.toFixed(2)}</div>
+                        <div class="cart-item-controls">
+                            <button class="qty-btn" onclick="changeQuantity('${item.id}', -1)">-</button>
+                            <span class="qty-display">${item.quantity}</span>
+                            <button class="qty-btn" onclick="changeQuantity('${item.id}', 1)">+</button>
+                            <button class="remove-btn" onclick="removeFromCart('${item.id}')">Eliminar</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const tax = subtotal * 0.1;
+            const total = subtotal + tax;
+
+            cartTotal.innerHTML = `
+                <div class="total-row">
+                    <span>Subtotal:</span>
+                    <span>${subtotal.toFixed(2)}</span>
+                </div>
+                <div class="total-row">
+                    <span>IVA (10%):</span>
+                    <span>${tax.toFixed(2)}</span>
+                </div>
+                <div class="total-row">
+                    <span>Total:</span>
+                    <span class="total-amount">${total.toFixed(2)}</span>
+                </div>
+                <button class="btn btn-primary" style="width: 100%; margin-top: 15px;" onclick="openCheckout()">
+                    Proceder al Pago
+                </button>
+            `;
+        }
+
+        async function changeQuantity(productId, change) {
+            try {
+                const cartItem = cart.find(item => item.id === productId);
+                const productDoc = await db.collection('products').doc(productId).get();
+                const product = productDoc.data();
+                
+                if (cartItem) {
+                    const newQuantity = cartItem.quantity + change;
+                    if (newQuantity > 0 && newQuantity <= product.stock) {
+                        cartItem.quantity = newQuantity;
+                    } else if (newQuantity <= 0) {
+                        removeFromCart(productId);
+                        return;
+                    } else {
+                        alert('No hay más stock disponible');
+                        return;
+                    }
+                    updateCart();
+                }
+            } catch (error) {
+                console.error('Error changing quantity:', error);
+            }
+        }
+
+        function removeFromCart(productId) {
+            cart = cart.filter(item => item.id !== productId);
+            updateCart();
+        }
+
+        function toggleCart() {
+            const cartPanel = document.querySelector('.cart-panel');
+            if (cartPanel) {
+                cartPanel.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        // ========================================
+        // AUTENTICACIÓN
+        // ========================================
+        function openAuthModal(view) {
+            const modal = document.getElementById('authModal');
+            const title = document.getElementById('authTitle');
+            const content = document.getElementById('authContent');
+
+            if (view === 'login') {
+                title.textContent = 'Iniciar Sesión';
+                content.innerHTML = `
+                    <form class="login-form" onsubmit="login(event)">
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="loginEmail" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Contraseña</label>
+                            <input type="password" id="loginPassword" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">Iniciar Sesión</button>
+                        <p style="text-align: center; margin-top: 15px; color: #6b7280;">
+                            ¿No tienes cuenta? 
+                            <a href="#" onclick="openAuthModal('register'); return false;" style="color: #667eea; font-weight: 600;">Regístrate</a>
+                        </p>
+                    </form>
+                `;
+            } else {
+                title.textContent = 'Crear Cuenta';
+                content.innerHTML = `
+                    <form class="login-form" onsubmit="register(event)">
+                        <div class="form-group">
+                            <label>Nombre Completo</label>
+                            <input type="text" id="registerName" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="registerEmail" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Contraseña</label>
+                            <input type="password" id="registerPassword" minlength="6" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Dirección</label>
+                            <textarea id="registerAddress" rows="2" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Teléfono</label>
+                            <input type="tel" id="registerPhone" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">Registrarse</button>
+                        <p style="text-align: center; margin-top: 15px; color: #6b7280;">
+                            ¿Ya tienes cuenta? 
+                            <a href="#" onclick="openAuthModal('login'); return false;" style="color: #667eea; font-weight: 600;">Inicia sesión</a>
+                        </p>
+                    </form>
+                `;
+            }
+
+            modal.classList.add('active');
+        }
+
+        function closeAuthModal() {
+            document.getElementById('authModal').classList.remove('active');
+        }
+
+        async function register(event) {
+            event.preventDefault();
+
+            const name = document.getElementById('registerName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const address = document.getElementById('registerAddress').value;
+            const phone = document.getElementById('registerPhone').value;
+
+            try {
+                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                const user = userCredential.user;
+
+                await db.collection('users').doc(user.uid).set({
+                    name: name,
+                    email: email,
+                    address: address,
+                    phone: phone,
+                    isAdmin: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+
+                closeAuthModal();
+                alert('✅ ¡Registro exitoso! Bienvenido a TechStore');
+            } catch (error) {
+                console.error('Error registering:', error);
+                if (error.code === 'auth/email-already-in-use') {
+                    alert('❌ Este email ya está registrado');
+                } else if (error.code === 'auth/weak-password') {
+                    alert('❌ La contraseña debe tener al menos 6 caracteres');
+                } else {
+                    alert('❌ Error al crear la cuenta: ' + error.message);
+                }
+            }
+        }
+
+        async function login(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                await auth.signInWithEmailAndPassword(email, password);
+                closeAuthModal();
+                alert('✅ ¡Bienvenido de nuevo!');
+            } catch (error) {
+                console.error('Error logging in:', error);
+                if (error.code === 'auth/user-not-found') {
+                    alert('❌ Usuario no encontrado');
+                } else if (error.code === 'auth/wrong-password') {
+                    alert('❌ Contraseña incorrecta');
+                } else {
+                    alert('❌ Error al iniciar sesión: ' + error.message);
+                }
+            }
+        }
+
+        async function logout() {
+            if (confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+                try {
+                    await auth.signOut();
+                    cart = [];
+                    alert('👋 Sesión cerrada correctamente');
+                } catch (error) {
+                    console.error('Error logging out:', error);
+                }
+            }
+        }
+
+        // ========================================
+        // CHECKOUT Y PEDIDOS
+        // ========================================
+        function openCheckout() {
+            if (cart.length === 0) return;
+            
+            const modal = document.getElementById('checkoutModal');
+            const content = document.getElementById('checkoutContent');
+
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const tax = subtotal * 0.1;
+            const total = subtotal + tax;
+
+            content.innerHTML = `
+                <div class="form-group">
+                    <label>Nombre Completo</label>
+                    <input type="text" id="customerName" value="${currentUser.name}" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="customerEmail" value="${currentUser.email}" required>
+                </div>
+                <div class="form-group">
+                    <label>Dirección de Envío</label>
+                    <textarea id="customerAddress" rows="2" required>${currentUser.address}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="tel" id="customerPhone" value="${currentUser.phone}" required>
+                </div>
+                <div class="form-group">
+                    <label>Método de Pago</label>
+                    <div class="payment-methods">
+                        <div class="payment-method selected" onclick="selectPayment(this, 'Tarjeta')">
+                            💳 Tarjeta
+                        </div>
+                        <div class="payment-method" onclick="selectPayment(this, 'Transferencia')">
+                            🏦 Transferencia
+                        </div>
+                        <div class="payment-method" onclick="selectPayment(this, 'PayPal')">
+                            💵 PayPal
+                        </div>
+                        <div class="payment-method" onclick="selectPayment(this, 'Efectivo')">
+                            📱 Efectivo
+                        </div>
+                    </div>
+                </div>
+                <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                    <div class="total-row">
+                        <span>Subtotal:</span>
+                        <span>${subtotal.toFixed(2)}</span>
+                    </div>
+                    <div class="total-row">
+                        <span>IVA (10%):</span>
+                        <span>${tax.toFixed(2)}</span>
+                    </div>
+                    <div class="total-row">
+                        <strong>Total a Pagar:</strong>
+                        <strong style="color: #667eea;">${total.toFixed(2)}</strong>
+                    </div>
+                </div>
+                <button class="btn btn-primary" style="width: 100%; margin-top: 20px;" onclick="processPayment()">
+                    Procesar Pago de ${total.toFixed(2)}
+                </button>
+            `;
+
+            modal.classList.add('active');
+        }
+
+        function closeCheckout() {
+            document.getElementById('checkoutModal').classList.remove('active');
+        }
+
+        function selectPayment(element, method) {
+            document.querySelectorAll('.payment-method').forEach(pm => pm.classList.remove('selected'));
+            element.classList.add('selected');
+            selectedPayment = method;
+        }
+
+        async function processPayment() {
+            const name = document.getElementById('customerName').value;
+            const email = document.getElementById('customerEmail').value;
+            const address = document.getElementById('customerAddress').value;
+            const phone = document.getElementById('customerPhone').value;
+
+            if (!name || !email || !address || !phone) {
+                alert('Por favor completa todos los campos');
+                return;
+            }
+
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const tax = subtotal * 0.1;
+            const total = subtotal + tax;
+
+            try {
+                const orderData = {
+                    userId: currentUser.uid,
+                    userEmail: currentUser.email,
+                    userName: name,
+                    items: cart.map(item => ({
+                        id: item.id,
+                        name: item.name,
+                        icon: item.icon,
+                        price: item.price,
+                        quantity: item.quantity
+                    })),
+                    subtotal: subtotal,
+                    tax: tax,
+                    total: total,
+                    paymentMethod: selectedPayment,
+                    shippingAddress: address,
+                    phone: phone,
+                    status: 'completed',
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+
+                const orderRef = await db.collection('orders').add(orderData);
+
+                const batch = db.batch();
+                for (const item of cart) {
+                    const productRef = db.collection('products').doc(item.id);
+                    batch.update(productRef, {
+                        stock: firebase.firestore.FieldValue.increment(-item.quantity)
+                    });
+                }
+                await batch.commit();
+
+                document.getElementById('checkoutContent').innerHTML = `
+                    <div class="success-animation">
+                        <div class="checkmark">✅</div>
+                        <h2>¡Pago Exitoso!</h2>
+                        <p style="color: #6b7280; margin: 15px 0;">
+                            Gracias por tu compra, ${name}.<br>
+                            <strong>ID de Pedido:</strong> ${orderRef.id.substring(0, 8)}
+                        </p>
+                        <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: left;">
+                            <p style="margin-bottom: 10px;"><strong>Resumen del Pedido:</strong></p>
+                            ${cart.map(item => `
+                                <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #e5e7eb;">
+                                    <span>${item.name} x${item.quantity}</span>
+                                    <span>${(item.price * item.quantity).toFixed(2)}</span>
+                                </div>
+                            `).join('')}
+                            <div style="display: flex; justify-content: space-between; padding: 10px 0; font-weight: bold; color: #667eea;">
+                                <span>Total:</span>
+                                <span>${total.toFixed(2)}</span>
+                            </div>
+                        </div>
+                        <p style="color: #6b7280; font-size: 14px;">
+                            Recibirás un email de confirmación en ${email}<br>
+                            Método de pago: ${selectedPayment}
+                        </p>
+                        <button class="btn btn-primary" style="width: 100%; margin-top: 20px;" onclick="finishPurchase()">
+                            Finalizar
+                        </button>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error processing payment:', error);
+                alert('❌ Error al procesar el pago. Intenta de nuevo.');
+            }
+        }
+
+        async function finishPurchase() {
+            cart = [];
+            updateCart();
+            closeCheckout();
+            await renderProducts();
+            alert('✅ ¡Gracias por tu compra! Puedes ver tu pedido en "Mis Pedidos"');
+        }
+
+        async function viewOrders() {
+            const ordersPanel = document.getElementById('ordersPanel');
+            const adminPanel = document.getElementById('adminPanel');
+            const ordersList = document.getElementById('ordersList');
+
+            if (!ordersPanel || !ordersList) return;
+
+            adminPanel.style.display = 'none';
+            ordersPanel.style.display = 'block';
+
+            try {
+                const snapshot = await db.collection('orders')
+                    .where('userId', '==', currentUser.uid)
+                    .orderBy('createdAt', 'desc')
+                    .get();
+
+                if (snapshot.empty) {
+                    ordersList.innerHTML = '<div class="empty-cart">📦<br>No tienes pedidos aún</div>';
+                    return;
+                }
+
+                const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                ordersList.innerHTML = orders.map(order => `
+                    <div class="order-card">
+                        <div class="order-header">
+                            <div>
+                                <div class="order-id">Pedido #${order.id.substring(0, 8)}</div>
+                                <div style="font-size: 12px; color: #6b7280; margin-top: 5px;">
+                                    ${order.createdAt ? new Date(order.createdAt.toDate()).toLocaleString('es-ES') : 'Fecha no disponible'}
+                                </div>
+                            </div>
+                            <div class="order-status completed">✓ Completado</div>
+                        </div>
+                        ${order.items.map(item => `
+                            <div class="order-item">
+                                <span>${item.icon} ${item.name} x${item.quantity}</span>
+                                <span>${(item.price * item.quantity).toFixed(2)}</span>
+                            </div>
+                        `).join('')}
+                        <div style="border-top: 2px solid #e5e7eb; margin-top: 10px; padding-top: 10px;">
+                            <div class="order-item" style="font-weight: 600; color: #667eea;">
+                                <span>Total:</span>
+                                <span>${order.total.toFixed(2)}</span>
+                            </div>
+                            <div style="font-size: 12px; color: #6b7280; margin-top: 5px;">
+                                Pago: ${order.paymentMethod}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('Error loading orders:', error);
+                ordersList.innerHTML = '<div class="empty-cart">❌<br>Error al cargar pedidos</div>';
+            }
+
+            ordersPanel.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function backToShop() {
+            const ordersPanel = document.getElementById('ordersPanel');
+            if (ordersPanel) {
+                ordersPanel.style.display = 'none';
+            }
+            document.querySelector('.products-section').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function toggleAdminPanel() {
+            const panel = document.getElementById('adminPanel');
+            const ordersPanel = document.getElementById('ordersPanel');
+            if (panel && ordersPanel) {
+                ordersPanel.style.display = 'none';
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
+        // ========================================
+        // INICIAR APLICACIÓN
+        // ========================================
+        initializeApp();
+    </script>
+</body>
+</html>
